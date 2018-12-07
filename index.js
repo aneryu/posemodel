@@ -3,36 +3,25 @@ import dat from 'dat.gui';
 import stats from './stats';
 import loadVideo from './loadVideo';
 import {drawKeypoints, drawSkeleton} from './utils';
+import * as THREE from 'three';
+import { layers } from '@tensorflow/tfjs';
+window.THREE = THREE;
 require('./GLTFLoader.js');
 require('./OrbitControls.js');
 const modalUrl = require('./RobotExpressive.glb');
+
+function wait(t) {
+    return new Promise(r => setTimeout(r, t));
+}
 
 let camera;
 let scene;
 let renderer;
 let clock;
 let mixer;
-let gltf;
 let model;
 let controls;
-let Head;
-let ShoulderL;
-let ShoulderR;
-let UpperArmL;
-let UpperArmR;
-let LowerArmL;
-let LowerArmR;
 let originPose;
-
-let originUpperArmLQ;
-let originLowerArmLQ;
-let originUpperArmRQ;
-let originLowerArmRQ;
-
-let upperArmLeftLength = 0;
-let upperArmRightLength = 0;
-let lowerArmLeftLength = 0;
-let lowerArmRightLength = 0;
 
 const pose = {
     nose: undefined,
@@ -54,13 +43,6 @@ const pose = {
     rightAnkle: undefined,
 };
 
-const radius = {
-    UpperArmLeft: 0,
-    LowerArmLeft: 0,
-    UpperArmRight: 0,
-    LowerArmRight: 0,
-};
-
 const last =  window.last = {};
 
 const locks = window.locks = {
@@ -68,14 +50,13 @@ const locks = window.locks = {
 };
 
 const object = window.object = {};
-
 const origin = window.origin = {};
+const origin2 = window.origin2 = {};
+const length = window.length = {};
+const readys = window.readys = {};
+const angles = window.angles = {};
 
-let minPartConfidence = 0.5;
-
-function distance(p1, p2) {
-    return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
-}
+let minPartConfidence = 0.8;
 
 async function updatePose(npose) {
     let [nose, leftEye, rightEye, leftEar, rightEar, leftShoulder, rightShoulder, leftElbow, rightElbow, leftWrist, rightWrist, leftHip, rightHip, leftKnee, rightKnee, leftAnkle, rightAnkle] = npose;
@@ -85,10 +66,16 @@ async function updatePose(npose) {
     
     Object.keys(pose).map(key => {
         let p = newPose[key];
+        if (!p) {
+            return;
+        }
         if (p.score > minPartConfidence) {
-            pose[key] = p.position;
+            pose[key] = new THREE.Vector2(p.position.x, p.position.y);
         }
     });
+    if (pose.leftHip && pose.rightHip) {
+        pose.center = getCenter(pose.leftHip, pose.rightHip);
+    }
 }
 
 window.unlockHead = function () {
@@ -96,43 +83,67 @@ window.unlockHead = function () {
     window.unlockHead = function() {};
 };
 
-window.checkReady = function () {
-    if ([
-        'nose',
-        'leftEye',
-        'rightEye',
-        'leftEar',
-        'rightEar'
-    ].every(e => pose[e])) {
-        window.unlockHead();
-    }
+function getCenter(p1, p2) {
+    return new THREE.Vector2((p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
+}
 
-    if (window.ready) {
-        last.nose = pose.nose;
-        last.leftEye = pose.leftEye;
-        last.rightEye = pose.rightEye;
+let count = 0;
+window.checkReady = function () {
+    if (!pose.leftHip || !pose.rightHip) {
         return;
     }
-    if ([
-        'nose',
-        'leftEye',
-        'rightEye',
-        'leftEar',
-        'rightEar',
-        'leftShoulder',
-        'rightShoulder',
-        'leftElbow',
-        'rightElbow',
-        'leftWrist',
-        'rightWrist',
-        // 'leftKnee', 
-        // 'rightKnee', 
-        // 'leftAnkle', 
-        // 'rightAnkle'
-    ].every(e => pose[e])) {
-        console.log('ready');
-        window.ready = true;
+    // let angle = new THREE.Vector2().subVectors(pose.leftHip, pose.rightHip).angle();
+    let center = defibrillate('center');
+    if (center === last.center) {
+        count++;
+    } else {
+        count = 0;
     }
+    if (count > 5) {
+        showReady();
+        count = 0;
+    }
+    
+    // console.log(angle);
+    // if (!locks.Head) {
+    //     return;
+    // }
+    // if ([
+    //     'nose',
+    //     'leftEye',
+    //     'rightEye',
+    //     'leftEar',
+    //     'rightEar'
+    // ].every(e => pose[e])) {
+    //     window.unlockHead();
+    // }
+
+    // if (window.ready) {
+    //     last.nose = pose.nose;
+    //     last.leftEye = pose.leftEye;
+    //     last.rightEye = pose.rightEye;
+    //     return;
+    // }
+    // if ([
+    //     'nose',
+    //     'leftEye',
+    //     'rightEye',
+    //     'leftEar',
+    //     'rightEar',
+    //     'leftShoulder',
+    //     'rightShoulder',
+    //     'leftElbow',
+    //     'rightElbow',
+    //     'leftWrist',
+    //     'rightWrist',
+    //     // 'leftKnee', 
+    //     // 'rightKnee', 
+    //     // 'leftAnkle', 
+    //     // 'rightAnkle'
+    // ].every(e => pose[e])) {
+    //     console.log('ready');
+    //     window.ready = true;
+    // }
 }
 
 window.stop = function () {
@@ -140,74 +151,42 @@ window.stop = function () {
     window.checkReady = () => {};
 }
 
-function updateRadius() {
-    let newUpperArmLeft = distance(pose.leftShoulder, pose.leftElbow);
-    if (radius.UpperArmLeft < newUpperArmLeft) {
-        radius.UpperArmLeft = newUpperArmLeft;
-    }
-    let newLowerArmLeft = distance(pose.leftElbow, pose.leftWrist);
-    if (radius.LowerArmLeft < newLowerArmLeft) {
-        radius.LowerArmLeft = newLowerArmLeft;
-    }
-}
+window.showReady = function () {
+    window.readyEl.classList.add('active');
+    window.showReady = () => {};
+};
 
 async function init() {
+    // await wait(10000);
+    window.readyEl.addEventListener('transitionend', () => console.log(1) || readyEl.classList.remove('active'))
+
     const video = await loadVideo();
     const net = await posenet.load();
     const canvas = document.getElementById('output');
     canvas.width = 300;
     canvas.height = 250;
-
     const ctx = canvas.getContext('2d');
     let minPartConfidence = 0.5;
-    let i = 0;
 
     async function refreshPose(time) {
         stats.begin();
         TWEEN.update(time);
-        await updatePose((await net.estimateSinglePose(video, 0.5, true, 16)).keypoints);
-        window.checkReady();
+        await updatePose((await net.estimateSinglePose(video, 1, true, 8)).keypoints);
+        
         let dt = clock.getDelta();
         if ( mixer ) mixer.update( dt );
-        if (!locks.Head) {
-            updateHead();
+        
+        updateHead(time);
+        updateBody();
+        updateArmL();
+        updateArmR();
 
-            let leftFaceLength = distance(pose.nose, pose.leftEar);
-            let rightFaceLength = distance(pose.nose, pose.rightEar);
-
-            let ratio = leftFaceLength / rightFaceLength;
-            // console.log(ratio);
-            if (ratio > 5) {
-                console.log('left');
-                anmiationTurnHead(-1);
-            } else if (ratio < 0.1) {
-                anmiationTurnHead(1);
-                console.log('right');
-            }
-            last.leftFaceLength = leftFaceLength;
-            last.rightFaceLength = rightFaceLength;
-
-            // console.log(pose.leftEar, pose.rightEar);
-        }
-
-        if (window.ready) {
-            updateRadius();
-
-            
-            updateArmL();
-            updateArmR();
-            // updateLegL();
-            // updateLegR();
-        }
-    
         if (originPose) {
             ctx.clearRect(0, 0, 600, 500);
             drawKeypoints(originPose, minPartConfidence, ctx);
             drawSkeleton(originPose, minPartConfidence, ctx);
         }
-        
-        renderer.render( scene, camera );
-    
+        renderer.render(scene, camera);
         stats.end();
         requestAnimationFrame(refreshPose);
     }
@@ -276,7 +255,6 @@ loader.load(modalUrl, function( _gltf ) {
     console.log(_gltf);
     model = _gltf.scene;
     scene.add( model );
-    gltf = _gltf;
 
     
     let names = getBone(scene, []);
@@ -284,6 +262,11 @@ loader.load(modalUrl, function( _gltf ) {
         object[name] = scene.getObjectByName(name);
         origin[name] = object[name].quaternion.clone();
     }
+
+    let legHeight = object.Body.position.y;
+    length.hip = object.UpperLegL.position.x * 2;
+    // object.Body.position.set(0, 0, 0);
+    origin2.Body = origin.Body;
 
     object.Head.quaternion.set(-0.0004230051726248802, 0.014537744856876672, -0.029081642508459328, 0.9994712267544827);
     object.UpperArmL.position.y = 0;
@@ -293,11 +276,6 @@ loader.load(modalUrl, function( _gltf ) {
     object.UpperArmR.quaternion.set(-0.5730939069771501, -0.8191740774928641, 0.020943043597471827, 0.00886714114718003);
     object.LowerArmR.position.x = 0.0002;
     object.LowerArmR.quaternion.set(-0.08876987551035145, -0.6406316196435936, 0.0847015956183325, 0.7579819463133176);
-
-    // origin.UpperArmL = object.UpperArmL.quaternion.clone();
-    // origin.LowerArmL = object.LowerArmL.quaternion.clone();
-    // origin.UpperArmR = object.UpperArmR.quaternion.clone();
-    // origin.LowerArmR = object.LowerArmR.quaternion.clone();
 
     object.LowerLegL.add(object.FootL);
     object.LowerLegR.add(object.FootR);
@@ -313,15 +291,11 @@ loader.load(modalUrl, function( _gltf ) {
     object.FootL.applyQuaternion(q);
     object.FootR.applyQuaternion(q);
 
-    // setObject('ShoulderL', 0, -1, 0, Math.PI / 4);
-    // setObject('ShoulderR', 0, 1, 0, Math.PI / 4);
-
     for (let name of ['Head', 'UpperArmL', 'LowerArmL', 'UpperArmR', 'LowerArmR', 'ShoulderL', 'ShoulderR', 'FootL', 'FootR']) {
         origin[name] = object[name].quaternion.clone();
     }
 
     mixer = new THREE.AnimationMixer( model );
-
     var material = new THREE.LineBasicMaterial( { color: 0x0000ff } );
     var geometry = new THREE.Geometry();
     geometry.vertices.push(new THREE.Vector3( -10, 0, 0) );
@@ -331,8 +305,8 @@ loader.load(modalUrl, function( _gltf ) {
     scene.add( line );
 });
 
-function setObject(objectName, x, y, z, a) {
-    let _q1 = origin[objectName].clone();
+window.setObject = function setObject(objectName, x, y, z, a) {
+    let _q1 = origin2[objectName].clone();
     let _q2 = new THREE.Quaternion();
     _q2.setFromAxisAngle(new THREE.Vector3(x, y, z), a);
     
@@ -340,8 +314,116 @@ function setObject(objectName, x, y, z, a) {
     object[objectName].applyQuaternion(_q2);
 }
 
-function updateHead() {
-    let {nose, leftEar, rightEar} = pose;
+function defibrillate(name, minDistance = 0.5) {
+    let prev = last[name];
+    let current = pose[name];
+    if (prev && current.distanceTo(prev) < minDistance) {
+        current = prev;
+    } else {
+        last[name] = current;
+    }
+    return current;
+}
+
+function setBodyBase() {
+    console.log('setBodyBase');
+    if (!readys.body) {
+        window.showReady();
+        readys.body = true;
+    }
+    length.poseHip = pose.leftHip.x - pose.rightHip.x;
+    length.poseShoulder = pose.leftShoulder.x - pose.rightShoulder.x;
+    length.poseLeg = ((pose.leftKnee.y - pose.leftHip.y) + (pose.rightKnee.y - pose.rightHip.y)) / 2;
+    origin.center = pose.center.clone();
+}
+function updateBody(t) {
+    if (!pose.leftHip || !pose.rightHip || !pose.leftShoulder || !pose.rightShoulder) {
+        return;
+    }
+    // let angle = new THREE.Vector2().subVectors(pose.leftHip, pose.rightHip).angle();
+    let center = defibrillate('center');
+    if (center === last.center) {
+        count++;
+    } else {
+        count = 0;
+    }
+    if (count > (readys.body ? 50 : 5)) {
+        setBodyBase();
+        count = 0;
+    }
+
+    if (!readys.body) {
+        return;
+    }
+
+    let axisAngle = new THREE.Vector2().subVectors(getCenter(pose.leftHip, pose.rightHip), getCenter(pose.leftShoulder, pose.rightShoulder)).angle();
+    angles.axis = axisAngle - (Math.PI / 2);
+
+    let jumpHeight = pose.center.y - origin.center.y;
+    // console.log(jumpHeight);
+    let diffy = Math.tan(angles.axis) * length.hip * Math.sign(angles.axis);
+    object.Body.position.y = length.hip * jumpHeight / length.poseHip + diffy;
+
+    
+
+    setObject('Body', 0, 0, 1, -angles.axis);
+    let q = new THREE.Quaternion();
+    q.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -angles.axis);
+
+    origin2.UpperArmL = origin.UpperArmL.clone().multiply(q);
+    origin2.LowerArmL = origin.LowerArmL.clone().multiply(q);
+    origin2.UpperArmR = origin.UpperArmR.clone().multiply(q);
+    origin2.LowerArmR = origin.LowerArmR.clone().multiply(q);
+
+    
+
+    origin2.UpperLegL = origin.UpperLegL.clone();
+    setObject('UpperLegL', 0, 0, 1, angles.axis);
+    origin2.UpperLegL = object.UpperLegL.quaternion.clone();
+
+    origin2.UpperLegR = origin.UpperLegR.clone();
+    setObject('UpperLegR', 0, 0, 1, angles.axis);
+    origin2.UpperLegR = object.UpperLegR.quaternion.clone();
+
+    // setObject('updateLegL', 0, 0, 1, -angles.axis);
+    // setObject('updateLegL', 0, 0, 1, -angles.axis);
+
+    // console.log(angles.axis / Math.PI * 180);
+    let poseLeftLeg = pose.leftKnee.y - pose.leftHip.y;
+    angles.leftLeg = Math.acos(poseLeftLeg / length.poseLeg);
+    if (isNaN(angles.leftLeg)) {
+        angles.leftLeg = 0;
+    }
+    let poseRightLeg = pose.rightKnee.y - pose.rightHip.y;
+    angles.rightLeg = Math.acos(poseRightLeg / length.poseLeg);
+    if (isNaN(angles.rightLeg)) {
+        angles.rightLeg = 0;
+    }
+    setObject('UpperLegR', 1, 0, 0, -angles.rightLeg);
+    // origin2.LowerLegL = object.LowerLegL.quaternion.clone();
+    // setObject('LowerLegL', 1, 0, 0, angles.leftLeg);
+
+    // console.log(angles.leftLeg / Math.PI * 180);
+}
+
+function updateHead(t) {
+    // console.log(t);
+    let nose = defibrillate('nose');
+    let leftEar = defibrillate('leftEar');
+    let rightEar = defibrillate('rightEar');
+    let leftShoulder = defibrillate('leftShoulder');
+    let rightShoulder = defibrillate('rightShoulder');
+
+    if (!nose || !leftEar || !rightEar || locks.Head) {
+        // console.log('no ready');
+        return;
+    }
+
+    if (last.nose === nose && last.leftEar === leftEar && last.rightEar === rightEar) {
+        console.log('no change');
+        return;
+    }
+
     let a = rightEar.y - leftEar.y;
     let b = leftEar.x - rightEar.x;
     let c = rightEar.x * leftEar.y - leftEar.x * rightEar.y;
@@ -367,7 +449,13 @@ function updateHead() {
 
 
 function updateArmL() {
+    if (!readys.body) {
+        return;
+    }
     let {leftShoulder, leftElbow, leftWrist} = pose;
+    if (!leftShoulder || !leftElbow || !leftWrist) {
+        return;
+    }
     let ux = (leftElbow.x - leftShoulder.x);
     let uy = (leftElbow.y - leftShoulder.y);
     let r = Math.sqrt(Math.pow(ux, 2) + Math.pow(uy, 2));
@@ -391,7 +479,13 @@ function updateArmL() {
 }
 
 function updateArmR() {
+    if (!readys.body) {
+        return;
+    }
     let {rightShoulder, rightElbow, rightWrist} = pose;
+    if (!rightShoulder || !rightElbow || !rightWrist) {
+        return;
+    }
     let ux = -(rightElbow.x - rightShoulder.x);
     let uy = -(rightElbow.y - rightShoulder.y);
     let r = Math.sqrt(Math.pow(ux, 2) + Math.pow(uy, 2));
