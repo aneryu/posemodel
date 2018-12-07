@@ -1,0 +1,23 @@
+{
+  "name": "posemodel",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@tensorflow-models/posenet": "^0.2.3",
+    "@tensorflow/tfjs": "^0.14.0",
+    "dat.gui": "^0.7.3",
+    "stats.js": "^0.17.0",
+    "three": "^0.99.0"
+  },
+  "devDependencies": {
+    "cssnano": "^4.1.7"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "browserslist": "last 2 Chrome versions",
+  "description": ""
+}

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title></title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://unpkg.com/normalize.css@8.0.1/normalize.css">
+    <script src="https://unpkg.com/three@0.98.0/build/three.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/16.3.5/Tween.min.js"></script>
+</head>
+
+<body>
+    <div id="main" style="position: fixed; bottom: 0; right: 0;">
+        <video id="video" playsinline style="transform: scaleX(-1);">
+        </video>
+        <canvas id="output" width="600"  height="500" style="
+            position: absolute;
+            top: 0;
+            left: 0;
+        "></canvas>
+        <button onclick="stop()" style="position: absolute; bottom: 0; right: 0;">停止</button>
+    </div>
+    <script src="./index.js"></script>
+</body>
+
+</html>
