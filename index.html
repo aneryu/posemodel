@@ -28,7 +28,7 @@
 </head>
 
 <body>
-    <div id="main" style="position: fixed; bottom: 0; right: 0;">
+    <div id="main" style="position: fixed; bottom: 0; left: 0;">
         <video id="video" playsinline style="transform: scaleX(-1);">
         </video>
         <canvas id="output" width="600"  height="500" style="
@@ -36,12 +36,14 @@
             top: 0;
             left: 0;
         "></canvas>
-        <button onclick="stop()" style="position: absolute; bottom: 0; right: 0;">停止</button>
     </div>
+    <video id="video2" src="./videoplayback.mp4" playsinline style="position: fixed; top: 0; right: 0">
+    </video>
     <div class="ready" id="readyEl">
         Ready
     </div>
     <script src="./index.js"></script>
+    <script src="./output.js"></script>
 </body>
 
 </html>

@@ -1,6 +1,6 @@
 import * as posenet from '@tensorflow-models/posenet';
 import dat from 'dat.gui';
-import stats from './stats';
+import Stats from 'stats.js';
 import loadVideo from './loadVideo';
 import {drawKeypoints, drawSkeleton} from './utils';
 import * as THREE from 'three';
@@ -9,6 +9,9 @@ window.THREE = THREE;
 require('./GLTFLoader.js');
 require('./OrbitControls.js');
 const modalUrl = require('./RobotExpressive.glb');
+
+const stats = new Stats();
+document.body.appendChild(stats.dom);
 
 function wait(t) {
     return new Promise(r => setTimeout(r, t));
@@ -46,7 +49,7 @@ const pose = {
 const last =  window.last = {};
 
 const locks = window.locks = {
-    Head: true,
+    Head: false,
 };
 
 const object = window.object = {};
@@ -103,62 +106,34 @@ window.checkReady = function () {
         showReady();
         count = 0;
     }
-    
-    // console.log(angle);
-    // if (!locks.Head) {
-    //     return;
-    // }
-    // if ([
-    //     'nose',
-    //     'leftEye',
-    //     'rightEye',
-    //     'leftEar',
-    //     'rightEar'
-    // ].every(e => pose[e])) {
-    //     window.unlockHead();
-    // }
-
-    // if (window.ready) {
-    //     last.nose = pose.nose;
-    //     last.leftEye = pose.leftEye;
-    //     last.rightEye = pose.rightEye;
-    //     return;
-    // }
-    // if ([
-    //     'nose',
-    //     'leftEye',
-    //     'rightEye',
-    //     'leftEar',
-    //     'rightEar',
-    //     'leftShoulder',
-    //     'rightShoulder',
-    //     'leftElbow',
-    //     'rightElbow',
-    //     'leftWrist',
-    //     'rightWrist',
-    //     // 'leftKnee', 
-    //     // 'rightKnee', 
-    //     // 'leftAnkle', 
-    //     // 'rightAnkle'
-    // ].every(e => pose[e])) {
-    //     console.log('ready');
-    //     window.ready = true;
-    // }
 }
 
 window.stop = function () {
-    window.ready = false;
-    window.checkReady = () => {};
+    window.isEnd = true;
 }
 
-window.showReady = function () {
+window.showReady = function () { 
     window.readyEl.classList.add('active');
+    window.video2.play();
+    setTimeout(() => {
+        window.startRecording();
+    }, 1000);
+    setTimeout(() => {
+        window.stopRecording();
+        window.download();
+        window.video2.stop();
+    }, 31000);
     window.showReady = () => {};
 };
 
 async function init() {
     // await wait(10000);
-    window.readyEl.addEventListener('transitionend', () => console.log(1) || readyEl.classList.remove('active'))
+    let stream = window.stream = await navigator.mediaDevices.getUserMedia({audio: true});
+    let audioCtx = window.audioCtx = new AudioContext();
+    let source = window.source = audioCtx.createMediaStreamSource(stream);
+    source.connect(audioCtx.destination);
+
+    window.readyEl.addEventListener('transitionend', () => readyEl.classList.remove('active'))
 
     const video = await loadVideo();
     const net = await posenet.load();
@@ -169,6 +144,9 @@ async function init() {
     let minPartConfidence = 0.5;
 
     async function refreshPose(time) {
+        if (window.isEnd) {
+            return;
+        }
         stats.begin();
         TWEEN.update(time);
         await updatePose((await net.estimateSinglePose(video, 1, true, 8)).keypoints);
@@ -186,54 +164,38 @@ async function init() {
             drawKeypoints(originPose, minPartConfidence, ctx);
             drawSkeleton(originPose, minPartConfidence, ctx);
         }
+
         renderer.render(scene, camera);
         stats.end();
         requestAnimationFrame(refreshPose);
     }
-
     requestAnimationFrame(refreshPose);
 }
 
 function initModal() {
-    camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 0.25, 100 );
-    camera.position.set(0, 3, 10 );
-    camera.lookAt( new THREE.Vector3( 0, 1, 0 ) );
-
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.25, 100);
+    camera.position.set(0, 0, 16);
+    camera.lookAt(new THREE.Vector3(0, 5, 16));
     scene = new THREE.Scene();
-    scene.background = new THREE.Color( 0xe0e0e0 );
-    scene.fog = new THREE.Fog( 0xe0e0e0, 20, 100 );
-
     clock = new THREE.Clock();
-
-    renderer = new THREE.WebGLRenderer( { antialias: true } );
-    renderer.setPixelRatio( window.devicePixelRatio );
-    renderer.setSize( window.innerWidth, window.innerHeight );
+    renderer = new THREE.WebGLRenderer({antialias: true});
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.gammaOutput = true;
     renderer.gammaFactor = 2.2;
-    document.body.appendChild( renderer.domElement );
-
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-
-    // lights
-
-    var light = new THREE.HemisphereLight( 0xffffff, 0x444444 );
-    light.position.set( 0, 20, 0 );
-    scene.add( light );
-
-    light = new THREE.DirectionalLight( 0xffffff );
-    light.position.set( 0, 20, 10 );
-    scene.add( light );
-
-    // ground
-
-    var mesh = new THREE.Mesh( new THREE.PlaneBufferGeometry( 2000, 2000 ), new THREE.MeshPhongMaterial( { color: 0x999999, depthWrite: false } ) );
-    mesh.rotation.x = - Math.PI / 2;
-    scene.add( mesh );
-
-    var grid = new THREE.GridHelper( 200, 40, 0x000000, 0x000000 );
-    grid.material.opacity = 0.2;
-    grid.material.transparent = true;
-    scene.add( grid );
+    renderer.shadowMapEnabled = true;
+    window.result = renderer.domElement;
+    document.body.appendChild(renderer.domElement);
+    controls = window.controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.object.position.y = 5;
+    var light = new THREE.HemisphereLight(0xffffff, 0xffffff);
+    light.position.set(0, 20, 0);
+    scene.add(light);
+    light = window.light = new THREE.DirectionalLight(0xffffff, .5);
+    light.castShadow = true;
+    light.position.set(-22, 14, 17);
+    light.quaternion.set(0, 0, -0.707106781186547, -0.7071067811865476);
+    scene.add(light);
 }
 
 init();
@@ -252,20 +214,27 @@ function getBone(obj, result = []) {
 }
 
 loader.load(modalUrl, function( _gltf ) {
-    console.log(_gltf);
     model = _gltf.scene;
-    scene.add( model );
+    let a = window.a = model.children[0];
+    scene.add(a);
+    a.traverse(e => {
+        if (e instanceof THREE.Mesh) {
+            e.castShadow = true;
+        }
+    });
 
-    
     let names = getBone(scene, []);
     for (let name of names) {
         object[name] = scene.getObjectByName(name);
         origin[name] = object[name].quaternion.clone();
     }
 
-    let legHeight = object.Body.position.y;
+    window.model = model;
+    length.legHeight = object.Body.position.y;
     length.hip = object.UpperLegL.position.x * 2;
     // object.Body.position.set(0, 0, 0);
+    // object.Body.position.z = 0.12;
+
     origin2.Body = origin.Body;
 
     object.Head.quaternion.set(-0.0004230051726248802, 0.014537744856876672, -0.029081642508459328, 0.9994712267544827);
@@ -296,13 +265,34 @@ loader.load(modalUrl, function( _gltf ) {
     }
 
     mixer = new THREE.AnimationMixer( model );
-    var material = new THREE.LineBasicMaterial( { color: 0x0000ff } );
-    var geometry = new THREE.Geometry();
-    geometry.vertices.push(new THREE.Vector3( -10, 0, 0) );
-    geometry.vertices.push(new THREE.Vector3( 0, 10, 0) );
-    geometry.vertices.push(new THREE.Vector3( 10, 0, 0) );
-    var line = new THREE.Line( geometry, material );
-    scene.add( line );
+
+    // ground
+    var loader = new THREE.TextureLoader();
+
+    var material = new THREE.MeshLambertMaterial({
+        map: loader.load(require('./tiananmen.jpg'))
+    });
+
+    var wall = window.wall = new THREE.Mesh( 
+        new THREE.PlaneBufferGeometry(45, 30), 
+        material
+    );
+    wall.position.y = 12;
+    wall.position.z = -12;
+    wall.rotation.x = 0.2;
+    wall.receiveShadow = true;
+    scene.add( wall );
+
+    var plane = window.plane = new THREE.Mesh( 
+        new THREE.PlaneBufferGeometry(45, 30), 
+        new THREE.MeshLambertMaterial({
+            map: loader.load(require('./ground.jpg'))
+        })
+    );
+
+    plane.rotation.x = -Math.PI / 2;
+    plane.receiveShadow = true;
+    scene.add(plane);
 });
 
 window.setObject = function setObject(objectName, x, y, z, a) {
@@ -317,10 +307,9 @@ window.setObject = function setObject(objectName, x, y, z, a) {
 function defibrillate(name, minDistance = 0.5) {
     let prev = last[name];
     let current = pose[name];
+    
     if (prev && current.distanceTo(prev) < minDistance) {
         current = prev;
-    } else {
-        last[name] = current;
     }
     return current;
 }
@@ -338,10 +327,11 @@ function setBodyBase() {
 }
 function updateBody(t) {
     if (!pose.leftHip || !pose.rightHip || !pose.leftShoulder || !pose.rightShoulder) {
+        // console.log('body not ready')
         return;
     }
-    // let angle = new THREE.Vector2().subVectors(pose.leftHip, pose.rightHip).angle();
-    let center = defibrillate('center');
+
+    let center = defibrillate('center', 1);
     if (center === last.center) {
         count++;
     } else {
@@ -351,8 +341,20 @@ function updateBody(t) {
         setBodyBase();
         count = 0;
     }
+    if (last.center) {
+        let dl = last.center.x - pose.leftHip.x;
+        let dr = pose.rightHip.x - last.center.x;
+        let dd = 5;
+        if (-dd < dl && dl < 0 && -dd < dr && dr < 0) {
+            window.anmiationTurnBody(1);
+        } else if (0 < dl && dl < dd && 0 < dr < dd) {
+            window.anmiationTurnBody(-1);
+        }
+        console.log(dl, dr);
+    }
+    last.center = center;
 
-    if (!readys.body) {
+    if (!readys.body || locks.Body) {
         return;
     }
 
@@ -361,11 +363,10 @@ function updateBody(t) {
 
     let jumpHeight = pose.center.y - origin.center.y;
     // console.log(jumpHeight);
-    let diffy = Math.tan(angles.axis) * length.hip * Math.sign(angles.axis);
-    object.Body.position.y = length.hip * jumpHeight / length.poseHip + diffy;
-
+    let diffy = Math.tan(angles.axis) * length.hip * Math.sign(angles.axis) + length.legHeight;
     
-
+    object.Body.position.y = length.hip * jumpHeight / length.poseHip + diffy;
+    
     setObject('Body', 0, 0, 1, -angles.axis);
     let q = new THREE.Quaternion();
     q.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -angles.axis);
@@ -374,8 +375,6 @@ function updateBody(t) {
     origin2.LowerArmL = origin.LowerArmL.clone().multiply(q);
     origin2.UpperArmR = origin.UpperArmR.clone().multiply(q);
     origin2.LowerArmR = origin.LowerArmR.clone().multiply(q);
-
-    
 
     origin2.UpperLegL = origin.UpperLegL.clone();
     setObject('UpperLegL', 0, 0, 1, angles.axis);
@@ -389,12 +388,12 @@ function updateBody(t) {
     // setObject('updateLegL', 0, 0, 1, -angles.axis);
 
     // console.log(angles.axis / Math.PI * 180);
-    let poseLeftLeg = pose.leftKnee.y - pose.leftHip.y;
+    let poseLeftLeg = pose.leftKnee.y - pose.leftHip.y + jumpHeight;
     angles.leftLeg = Math.acos(poseLeftLeg / length.poseLeg);
     if (isNaN(angles.leftLeg)) {
         angles.leftLeg = 0;
     }
-    let poseRightLeg = pose.rightKnee.y - pose.rightHip.y;
+    let poseRightLeg = pose.rightKnee.y - pose.rightHip.y + jumpHeight;
     angles.rightLeg = Math.acos(poseRightLeg / length.poseLeg);
     if (isNaN(angles.rightLeg)) {
         angles.rightLeg = 0;
@@ -420,9 +419,13 @@ function updateHead(t) {
     }
 
     if (last.nose === nose && last.leftEar === leftEar && last.rightEar === rightEar) {
-        console.log('no change');
+        // console.log('no change');
         return;
     }
+
+    last.nose = nose;
+    last.leftEar = leftEar;
+    last.rightEar = rightEar;
 
     let a = rightEar.y - leftEar.y;
     let b = leftEar.x - rightEar.x;
@@ -446,7 +449,6 @@ function updateHead(t) {
     let outq = xq.multiply(yq);
     object.Head.quaternion.set(outq.x, outq.y, outq.z, outq.w);
 }
-
 
 function updateArmL() {
     if (!readys.body) {
@@ -539,6 +541,22 @@ function anmiationTurnHead(sign) {
         .onComplete(function () {
             // console.log('onComplete');
             locks.Head = false;
+        })
+        .start();
+}
+
+window.anmiationTurnBody = function anmiationTurnBody(sign) {
+    let t = {a: 0};
+    locks.Body = true;
+    new TWEEN.Tween(t).to({a: sign * Math.PI * 2}, 1000)
+        .easing(TWEEN.Easing.Quadratic.Out)
+        .onUpdate(function () {
+            // console.log(1);
+            setObject('Body', 0, 1, 0, t.a);
+        })
+        .onComplete(function () {
+            // console.log('onComplete');
+            locks.Body = false;
         })
         .start();
 }
